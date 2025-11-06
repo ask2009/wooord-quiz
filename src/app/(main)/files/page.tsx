@@ -1,207 +1,223 @@
 
 "use client";
 
-import { useLinguaLift } from "@/hooks/useLinguaLift";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState, useMemo, useEffect } from "react";
-import WeakWordsChart from "@/components/stats/WeakWordsChart";
-import { FileText, BrainCircuit } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useRouter } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
-import AccuracyTrendChart from "@/components/stats/AccuracyTrendChart";
+import React, { useRef } from 'react';
+import { useLinguaLift } from '@/hooks/useLinguaLift';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Upload, FileText, Trash2, Settings } from 'lucide-react';
+import { VocabularyFile, VocabularyWord } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
-export default function StatsPage() {
-  const { files, history, setQuizSettings, setLastQuizSettings, settings, setSettings } = useLinguaLift();
-  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
-  const [api, setApi] = useState<CarouselApi>();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (files.length > 0 && selectedFileId === null) {
-      setSelectedFileId(files[0].id);
-    }
-    if (files.length === 0) {
-        setSelectedFileId(null);
-    }
-  }, [files, selectedFileId]);
+export default function FilesPage() {
+  const { files, addFile, deleteFile, settings, setSettings } = useLinguaLift();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
   
-  useEffect(() => {
-    if (!api) return;
-
-    // Set initial slide without animation
-    if (settings.statsCarouselIndex !== undefined) {
-      api.scrollTo(settings.statsCarouselIndex, true);
+  const parseCsvLine = (line: string): string[] => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      let char = line[i];
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          // This is an escaped quote
+          current += '"';
+          i++; // Skip the next quote
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
     }
-
-    const handleSelect = () => {
-      setSettings({ statsCarouselIndex: api.selectedScrollSnap() });
-    };
-    
-    api.on("select", handleSelect);
-
-    return () => {
-      api.off("select", handleSelect);
-    };
-  }, [api, settings.statsCarouselIndex, setSettings]);
-
-  const handleFileChange = (fileId: string) => {
-    setSelectedFileId(fileId);
+    result.push(current.trim());
+    return result.map(field => field.replace(/^"|"$/g, '').trim());
   };
-  
-  const selectedFile = useMemo(() => files.find(f => f.id === selectedFileId), [files, selectedFileId]);
-  const fileHistory = useMemo(() => history.filter(h => h.fileId === selectedFileId), [history, selectedFileId]);
 
-  const weakWords = useMemo(() => {
-    if (!selectedFile) return [];
-    
-    const wordStats = new Map<string, { correct: number, total: number }>();
-    
-    history.filter(h => h.fileId === selectedFile.id).forEach(record => {
-      if (!wordStats.has(record.wordId)) {
-        wordStats.set(record.wordId, { correct: 0, total: 0 });
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== 'text/csv') {
+      toast({
+        title: '無効なファイル形式です',
+        description: 'CSVファイルをアップロードしてください。',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      try {
+        const lines = text.split('\n').filter(line => line.trim() !== '');
+        if (lines.length <= 1) { // Also check if there's more than just a header
+            toast({
+              title: 'ファイルが空か、ヘッダーのみです',
+              description: 'CSVファイルに単語が含まれていることを確認してください。',
+              variant: 'destructive',
+            });
+            return;
+        }
+        
+        const words: VocabularyWord[] = lines
+          .slice(1) // Skip the header row
+          .map((line, index) => {
+            const [english, japanese] = parseCsvLine(line);
+            if (!english || !japanese) throw new Error(`Invalid format on line ${index + 2}`); // +2 because of slice and 0-based index
+            return { id: `${Date.now()}-${index}`, english, japanese };
+          });
+        
+        if (words.length === 0) {
+            toast({
+              title: '単語が見つかりません',
+              description: 'ヘッダー行以降に単語データがあるか確認してください。',
+              variant: 'destructive',
+            });
+            return;
+        }
+
+        const newFile: VocabularyFile = {
+          id: `file-${Date.now()}`,
+          name: file.name,
+          words: words,
+        };
+
+        addFile(newFile);
+        toast({
+          title: 'ファイルがアップロードされました',
+          description: `"${file.name}" が正常に追加されました。`,
+        });
+      } catch (error) {
+        toast({
+          title: 'CSVの解析中にエラーが発生しました',
+          description: 'CSVが "english,japanese" の形式（ヘッダー行を含む）であることを確認してください。',
+          variant: 'destructive',
+        });
       }
-      const stats = wordStats.get(record.wordId)!;
-      stats.total++;
-      if (record.correct) {
-        stats.correct++;
-      }
-    });
-
-    return Array.from(wordStats.entries())
-      .map(([wordId, stats]) => {
-         const incorrectRate = stats.total > 0 ? (stats.total - stats.correct) / stats.total : 0;
-         return {
-            wordId,
-            incorrectCount: stats.total - stats.correct,
-            incorrectRate
-         }
-      })
-      .filter(item => item.incorrectRate >= 0.5 && item.incorrectCount > 0)
-      .map(({ wordId, incorrectCount, incorrectRate }) => ({
-        word: selectedFile.words.find(w => w.id === wordId),
-        incorrectCount,
-        incorrectRate,
-      }))
-      .filter(item => !!item.word)
-      .sort((a, b) => b.incorrectRate - a.incorrectRate || b.incorrectCount - a.incorrectCount);
-
-  }, [history, selectedFile]);
-
+    };
+    reader.readAsText(file);
+    
+    // Reset file input
+    if(event.target) {
+      event.target.value = '';
+    }
+  };
 
   return (
-    <div className="container mx-auto max-w-2xl p-4">
-      <header className="py-6">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">あなたの進捗</h1>
+    <div className="container mx-auto max-w-2xl p-4 space-y-6">
+      <header className="flex items-center justify-between py-6">
+        <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">設定</h1>
+        </div>
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileUpload}
+          className="hidden"
+          accept=".csv"
+        />
+        <Button onClick={() => fileInputRef.current?.click()}>
+          <Upload className="mr-2 h-4 w-4" />
+          CSVをアップロード
+        </Button>
       </header>
+      
+      <Card>
+        <CardHeader>
+          <CardTitle>クイズ設定</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+            <div className="flex items-center justify-between rounded-lg border p-4">
+              <Label htmlFor="tap-to-continue" className="flex flex-col gap-1">
+                <span className="font-semibold">不正解時にタップして続行</span>
+                <span className="font-normal text-muted-foreground text-sm">オンの場合、入力問題で間違えた後にタップするまで次の問題に進みません。</span>
+              </Label>
+              <Switch
+                id="tap-to-continue"
+                checked={settings.tapToContinueOnIncorrect}
+                onCheckedChange={(checked) => setSettings({ tapToContinueOnIncorrect: checked })}
+              />
+            </div>
+        </CardContent>
+      </Card>
 
-      {files.length === 0 ? (
-         <Card>
-            <CardContent className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted p-12 text-center">
+      <Card>
+        <CardHeader>
+          <CardTitle>単語セット</CardTitle>
+          <CardDescription>
+            学習を開始するために、英単語と日本語のペアを含むCSVファイルをアップロードしてください。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {files.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted p-12 text-center">
               <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
-              <h3 className="mt-4 text-lg font-semibold">分析するデータがありません</h3>
+              <h3 className="mt-4 text-lg font-semibold">まだファイルがありません</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                ファイルをアップロードしてクイズを完了すると、統計が表示されます。
+                「CSVをアップロード」をクリックして、最初の単語セットを追加してください。
               </p>
-            </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          <Select onValueChange={handleFileChange} value={selectedFileId || undefined}>
-            <SelectTrigger>
-              <SelectValue placeholder="単語セットを選択" />
-            </SelectTrigger>
-            <SelectContent>
-              {files.map(file => (
-                <SelectItem key={file.id} value={file.id}>
-                  {file.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {selectedFileId && fileHistory.length > 0 ? (
-            <>
-               <Card>
-                <CardHeader>
-                  <CardTitle>パフォーマンス概要</CardTitle>
-                  <CardDescription>"{selectedFile?.name}" のパフォーマンス。</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Carousel setApi={setApi} className="w-full">
-                    <CarouselContent>
-                      <CarouselItem>
-                         <Card>
-                            <CardHeader>
-                                <CardTitle className="text-lg">全体的な正解率</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <WeakWordsChart history={fileHistory} />
-                            </CardContent>
-                         </Card>
-                      </CarouselItem>
-                      <CarouselItem>
-                         <Card>
-                            <CardHeader>
-                                <CardTitle className="text-lg">正解率の推移</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <AccuracyTrendChart history={fileHistory} />
-                            </CardContent>
-                         </Card>
-                      </CarouselItem>
-                    </CarouselContent>
-                    <CarouselPrevious className="hidden sm:flex" />
-                    <CarouselNext className="hidden sm:flex" />
-                  </Carousel>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex justify-between items-start">
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {files.map((file) => (
+                <li key={file.id} className="flex items-center justify-between rounded-lg border bg-card p-4 transition-shadow hover:shadow-md">
+                  <div className="flex items-center gap-4">
+                    <FileText className="h-6 w-6 text-primary" />
                     <div>
-                      <CardTitle>苦手な単語</CardTitle>
-                      <CardDescription>間違えた単語を練習しましょう！</CardDescription>
+                      <p className="font-semibold">{file.name}</p>
+                      <p className="text-sm text-muted-foreground">{file.words.length} 単語</p>
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent>
-                  {weakWords.length > 0 ? (
-                    <ul className="space-y-2">
-                      {weakWords.map(({ word, incorrectCount, incorrectRate }) => word && (
-                        <li key={word.id} className="flex justify-between items-center rounded-lg border bg-card p-3">
-                          <div>
-                            <p className="font-semibold text-foreground">{word.japanese}</p>
-                            <p className="text-sm text-muted-foreground">{word.english}</p>
-                          </div>
-                          <div className="text-right">
-                             <Badge variant="destructive">
-                              誤答率 {Math.round(incorrectRate * 100)}%
-                            </Badge>
-                            <p className="text-xs text-muted-foreground mt-1">{incorrectCount} 回不正解</p>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-center text-muted-foreground py-8">このセットではまだ不正解が記録されていません。素晴らしい！</p>
-                  )}
-                </CardContent>
-              </Card>
-            </>
-          ) : (
-             <Card>
-                <CardContent className="text-center text-muted-foreground p-12">
-                  <p>このファイルのクイズ履歴はまだありません。</p>
-                  <p className="text-sm">クイズを完了すると統計が表示されます。</p>
-                </CardContent>
-            </Card>
+                  <div className="flex items-center gap-2">
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="icon" className='h-9 w-9'>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>よろしいですか？</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            これにより、"{file.name}" とそれに関連するすべてのクイズ履歴が完全に削除されます。この操作は元に戻せません。
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => deleteFile(file.id)}>
+                            削除
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
-        </div>
-      )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
