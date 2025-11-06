@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
@@ -22,7 +23,8 @@ export default function QuizManager() {
     setQuizSettings, 
     addAnswerHistory, 
     lastQuizSettings,
-    setLastQuizSettings
+    setLastQuizSettings,
+    settings
   } = useLinguaLift();
   
   const [stage, setStage] = useState<QuizStage>(quizSettings ? 'loading' : 'setup');
@@ -32,27 +34,34 @@ export default function QuizManager() {
   const router = useRouter();
 
   const getWeakWords = useCallback(() => {
-    const wordStats = new Map<string, { correct: number; total: number }>();
-    history.forEach(record => {
-        const file = files.find(f => f.words.some(w => w.id === record.wordId));
-        if (!file) return; // Word from a deleted file
+    const wordStats = new Map<string, { correct: number, total: number }>();
 
-        if (!wordStats.has(record.wordId)) {
-            wordStats.set(record.wordId, { correct: 0, total: 0 });
-        }
-        const stats = wordStats.get(record.wordId)!;
-        stats.total++;
-        if (record.correct) {
-            stats.correct++;
-        }
+    // We only care about history for files that still exist.
+    const allKnownWordIds = new Set(files.flatMap(f => f.words.map(w => w.id)));
+    const relevantHistory = history.filter(h => allKnownWordIds.has(h.wordId));
+
+    relevantHistory.forEach(record => {
+      if (!wordStats.has(record.wordId)) {
+        wordStats.set(record.wordId, { correct: 0, total: 0 });
+      }
+      const stats = wordStats.get(record.wordId)!;
+      stats.total++;
+      if (record.correct) {
+        stats.correct++;
+      }
     });
-
+  
     const allWords = files.flatMap(f => f.words);
-    const weakWordIds = Array.from(wordStats.entries())
-        .filter(([, stats]) => stats.total > 0 && (stats.correct / stats.total) < 0.6)
-        .map(([wordId]) => wordId);
+    const weakWordIds = new Set(
+      Array.from(wordStats.entries())
+        .filter(([, stats]) => {
+            const incorrectRate = stats.total > 0 ? (stats.total - stats.correct) / stats.total : 0;
+            return incorrectRate >= 0.5 && (stats.total - stats.correct) > 0;
+        })
+        .map(([wordId]) => wordId)
+    );
     
-    return allWords.filter(word => weakWordIds.includes(word.id));
+    return allWords.filter(word => weakWordIds.has(word.id));
   }, [history, files]);
 
 
@@ -128,6 +137,14 @@ export default function QuizManager() {
     }
   }, [quizSettings, stage, startQuiz]);
 
+  const handleNextQuestion = () => {
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex(prev => prev + 1);
+    } else {
+      setStage('results');
+    }
+  }
+
   const handleAnswer = (isCorrect: boolean) => {
     const newAnswers = [...userAnswers];
     newAnswers[currentQuestionIndex] = isCorrect;
@@ -148,17 +165,47 @@ export default function QuizManager() {
         }]);
     }
     
-    setTimeout(() => {
-      if (currentQuestionIndex < questions.length - 1) {
-        setCurrentQuestionIndex(prev => prev + 1);
-      } else {
-        setStage('results');
-      }
-    }, 1200);
+    const isTypingQuestion = currentQuestion.type === 'jp-to-en-typing';
+    const wasIncorrectTyping = isTypingQuestion && !isCorrect;
+
+    // For typing questions that were answered incorrectly, the TypingQuestion component
+    // now handles the pause IF the setting is enabled.
+    if (wasIncorrectTyping && settings.tapToContinueOnIncorrect) {
+      // The TypingQuestion component will call `onAnswer` again via `proceed` function
+      // when the user taps to continue. So we just advance.
+      handleNextQuestion();
+    } else {
+      // For all other cases (correct answers, MC questions, or typing with setting off),
+      // we use the standard delay.
+      setTimeout(() => {
+        handleNextQuestion();
+      }, 1200);
+    }
   };
 
   const handleSkip = () => {
-    handleAnswer(false);
+    // Treat skip as an incorrect answer
+    const newAnswers = [...userAnswers];
+    newAnswers[currentQuestionIndex] = false;
+    setUserAnswers(newAnswers);
+
+    const currentQuestion = questions[currentQuestionIndex];
+    if (!currentQuestion) return;
+
+    const file = files.find(f => f.words.some(w => w.id === currentQuestion.word.id));
+    const fileId = file ? file.id : "unknown";
+    
+    if (fileId !== 'unknown') {
+        addAnswerHistory([{
+          fileId: fileId,
+          wordId: currentQuestion.word.id,
+          correct: false,
+          timestamp: Date.now()
+        }]);
+    }
+    
+    // Immediately go to the next question without the delay
+    handleNextQuestion();
   }
   
   const incorrectWords = useMemo(() => {

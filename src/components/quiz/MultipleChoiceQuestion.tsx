@@ -46,14 +46,14 @@ export default function MultipleChoiceQuestion({ question: { word, options }, on
                     variant="outline"
                     size="lg"
                     className={cn(
-                        "h-auto justify-start p-4 text-base relative hover:bg-transparent",
+                        "h-auto justify-start p-4 text-base relative whitespace-normal text-left",
                         isAnswered && isCorrect && "border-green-500 text-green-500 border-2",
                         isAnswered && isSelected && !isCorrect && "border-red-500 text-red-500 border-2"
                     )}
                     onClick={() => handleOptionClick(option.id)}
                     disabled={isAnswered}
                 >
-                    {getOptionText(option)}
+                    <span className="flex-1 pr-8">{getOptionText(option)}</span>
                     {isAnswered && isCorrect && <CheckCircle2 className="absolute right-4 h-6 w-6 text-green-500" />}
                 </Button>
             )

@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
@@ -7,6 +8,7 @@ import { Input } from '../ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { cn } from '@/lib/utils';
 import { CheckCircle2, ArrowRight } from 'lucide-react';
+import { useLinguaLift } from '@/hooks/useLinguaLift';
 
 type TypingQuestionProps = {
   question: Question;
@@ -15,9 +17,11 @@ type TypingQuestionProps = {
 };
 
 export default function TypingQuestion({ question: { word }, onAnswer, onSkip }: TypingQuestionProps) {
+  const { settings } = useLinguaLift();
   const [inputValue, setInputValue] = useState('');
   const [isAnswered, setIsAnswered] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
+  const [showTapToContinue, setShowTapToContinue] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -25,7 +29,24 @@ export default function TypingQuestion({ question: { word }, onAnswer, onSkip }:
     setInputValue('');
     setIsAnswered(false);
     setIsCorrect(null);
+    setShowTapToContinue(false);
   }, [word]);
+
+  const proceed = () => {
+    onAnswer(isCorrect ?? false);
+  };
+  
+  const handleProceed = () => {
+    if (!showTapToContinue) return;
+    proceed();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (showTapToContinue) {
+        e.preventDefault();
+        proceed();
+    }
+  };
   
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,18 +55,33 @@ export default function TypingQuestion({ question: { word }, onAnswer, onSkip }:
     const correct = inputValue.trim().toLowerCase() === word.english.toLowerCase();
     setIsCorrect(correct);
     setIsAnswered(true);
-    onAnswer(correct);
+
+    if (correct) {
+      onAnswer(true);
+    } else {
+      if (settings.tapToContinueOnIncorrect) {
+        setShowTapToContinue(true);
+      } else {
+        onAnswer(false);
+      }
+    }
   };
   
   const handleSkip = () => {
     if (isAnswered || !onSkip) return;
     setIsCorrect(false);
     setIsAnswered(true);
-    onSkip();
+    // Directly call onAnswer because skipping implies incorrect. The parent handles the timeout.
+    onAnswer(false);
   }
 
   return (
-    <Card className="shadow-lg">
+    <Card 
+      className="shadow-lg"
+      onClick={handleProceed}
+      onKeyDown={handleKeyDown}
+      tabIndex={showTapToContinue ? 0 : -1}
+    >
        <CardHeader>
         <CardDescription>入力問題</CardDescription>
         <CardTitle className="text-3xl text-center py-8 font-headline">
@@ -80,9 +116,17 @@ export default function TypingQuestion({ question: { word }, onAnswer, onSkip }:
             </div>
 
             {isAnswered && !isCorrect && (
-                <div className="rounded-md bg-destructive/10 p-3 text-center">
+                <div 
+                  className={cn(
+                    "rounded-md bg-destructive/10 p-3 text-center",
+                    showTapToContinue && "cursor-pointer"
+                  )}
+                >
                     <p className="text-sm text-destructive">正解:</p>
                     <p className="font-semibold text-foreground">{word.english}</p>
+                    {showTapToContinue && (
+                        <p className="text-xs text-muted-foreground animate-pulse mt-2">タップして続行</p>
+                    )}
                 </div>
             )}
              {!isAnswered && onSkip && (
