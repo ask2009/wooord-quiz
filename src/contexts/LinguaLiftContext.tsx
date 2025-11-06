@@ -1,7 +1,8 @@
+
 "use client";
 
 import React, { createContext, useReducer, useEffect, ReactNode, useCallback } from 'react';
-import { AnswerRecord, VocabularyFile, QuizSettings } from '@/lib/types';
+import { AnswerRecord, VocabularyFile, QuizSettings, AppSettings } from '@/lib/types';
 import { useToast } from "@/hooks/use-toast";
 
 type State = {
@@ -10,6 +11,7 @@ type State = {
   quizSettings: QuizSettings | null;
   lastQuizSettings: QuizSettings | null;
   isQuizInProgress: boolean;
+  settings: AppSettings;
 };
 
 type Action =
@@ -18,7 +20,8 @@ type Action =
   | { type: 'DELETE_FILE'; payload: string }
   | { type: 'ADD_HISTORY'; payload: AnswerRecord[] }
   | { type: 'SET_QUIZ_SETTINGS'; payload: QuizSettings | null }
-  | { type: 'SET_LAST_QUIZ_SETTINGS'; payload: QuizSettings | null };
+  | { type: 'SET_LAST_QUIZ_SETTINGS'; payload: QuizSettings | null }
+  | { type: 'SET_SETTINGS'; payload: Partial<AppSettings> };
 
 const initialState: State = {
   files: [],
@@ -26,6 +29,10 @@ const initialState: State = {
   quizSettings: null,
   lastQuizSettings: null,
   isQuizInProgress: false,
+  settings: {
+    tapToContinueOnIncorrect: true,
+    statsCarouselIndex: 0,
+  },
 };
 
 function linguaLiftReducer(state: State, action: Action): State {
@@ -45,6 +52,8 @@ function linguaLiftReducer(state: State, action: Action): State {
         return { ...state, quizSettings: action.payload, isQuizInProgress: action.payload !== null };
     case 'SET_LAST_QUIZ_SETTINGS':
         return { ...state, lastQuizSettings: action.payload };
+    case 'SET_SETTINGS':
+        return { ...state, settings: { ...state.settings, ...action.payload } };
     default:
       return state;
   }
@@ -56,6 +65,7 @@ interface LinguaLiftContextType extends State {
   addAnswerHistory: (records: AnswerRecord[]) => void;
   setQuizSettings: (settings: QuizSettings | null) => void;
   setLastQuizSettings: (settings: QuizSettings | null) => void;
+  setSettings: (settings: Partial<AppSettings>) => void;
 }
 
 export const LinguaLiftContext = createContext<LinguaLiftContextType | undefined>(undefined);
@@ -72,7 +82,18 @@ export function LinguaLiftProvider({ children }: { children: ReactNode }) {
         // We don't want to persist quiz settings across page reloads
         parsedState.quizSettings = null;
         parsedState.isQuizInProgress = false;
-        dispatch({ type: 'SET_STATE', payload: parsedState });
+        
+        // Ensure settings are properly merged with defaults for backward compatibility
+        const finalState = {
+            ...initialState,
+            ...parsedState,
+            settings: {
+                ...initialState.settings,
+                ...(parsedState.settings || {}),
+            }
+        };
+
+        dispatch({ type: 'SET_STATE', payload: finalState });
       }
     } catch (error) {
       console.error('Failed to load state from localStorage', error);
@@ -122,8 +143,12 @@ export function LinguaLiftProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SET_LAST_QUIZ_SETTINGS', payload: settings });
   }, []);
 
+  const setSettings = useCallback((settings: Partial<AppSettings>) => {
+    dispatch({ type: 'SET_SETTINGS', payload: settings });
+  }, []);
+
   return (
-    <LinguaLiftContext.Provider value={{ ...state, addFile, deleteFile, addAnswerHistory, setQuizSettings, setLastQuizSettings }}>
+    <LinguaLiftContext.Provider value={{ ...state, addFile, deleteFile, addAnswerHistory, setQuizSettings, setLastQuizSettings, setSettings }}>
       {children}
     </LinguaLiftContext.Provider>
   );

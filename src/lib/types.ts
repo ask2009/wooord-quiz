@@ -1,3 +1,4 @@
+
 export type VocabularyWord = {
   id: string;
   english: string;
@@ -11,6 +12,11 @@ export type VocabularyFile = {
 };
 
 export type QuestionType = 'en-to-jp-mc' | 'jp-to-en-mc' | 'jp-to-en-typing';
+
+export type AppSettings = {
+    tapToContinueOnIncorrect: boolean;
+    statsCarouselIndex: number;
+};
 
 export type QuizSettings = {
   fileIds: string[];

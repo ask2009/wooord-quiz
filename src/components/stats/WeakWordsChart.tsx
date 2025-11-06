@@ -1,15 +1,9 @@
+
 "use client"
 
 import { useMemo } from "react"
 import { Pie, PieChart, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts"
 import { AnswerRecord } from "@/lib/types"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import {
   ChartContainer,
   ChartTooltipContent,
@@ -34,7 +28,11 @@ export default function WeakWordsChart({ history }: WeakWordsChartProps) {
   const total = useMemo(() => history.length, [history]);
 
   if (total === 0) {
-    return null;
+    return (
+        <div className="flex items-center justify-center h-[250px] text-muted-foreground">
+            データがありません
+        </div>
+    );
   }
 
   const chartConfig = {
@@ -74,24 +72,15 @@ export default function WeakWordsChart({ history }: WeakWordsChartProps) {
             ))}
           </Pie>
            <Legend
-            content={({ payload }) => {
+            verticalAlign="middle"
+            align="center"
+            content={() => {
               return (
-                <div className="flex flex-col items-center justify-center gap-2">
-                <div
-                    className="flex flex-col items-center justify-center"
-                    style={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      textAlign: 'center',
-                    }}
-                >
+                <div className="flex flex-col items-center justify-center">
                     <div className="text-3xl font-bold">
                         {Math.round((data[0].value / total) * 100)}%
                     </div>
-                    <div className="text-xs text-muted-foreground">Accuracy</div>
-                </div>
+                    <div className="text-xs text-muted-foreground">正解率</div>
                 </div>
               )
             }}
