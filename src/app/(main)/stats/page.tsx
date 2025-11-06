@@ -1,18 +1,25 @@
+
 "use client";
 
 import { useLinguaLift } from "@/hooks/useLinguaLift";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useMemo, useEffect } from "react";
-import WeakWordsChart from "@/components/stats/WeakWordsChart";
 import { FileText, BrainCircuit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
+import dynamic from "next/dynamic";
+
+const WeakWordsChart = dynamic(() => import("@/components/stats/WeakWordsChart"), { ssr: false });
+const AccuracyTrendChart = dynamic(() => import("@/components/stats/AccuracyTrendChart"), { ssr: false });
+
 
 export default function StatsPage() {
-  const { files, history, setQuizSettings, setLastQuizSettings } = useLinguaLift();
+  const { files, history, setQuizSettings, setLastQuizSettings, settings, setSettings } = useLinguaLift();
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [api, setApi] = useState<CarouselApi>();
   const router = useRouter();
 
   useEffect(() => {
@@ -23,6 +30,25 @@ export default function StatsPage() {
         setSelectedFileId(null);
     }
   }, [files, selectedFileId]);
+  
+  useEffect(() => {
+    if (!api) return;
+
+    // Set initial slide without animation
+    if (settings.statsCarouselIndex !== undefined) {
+      api.scrollTo(settings.statsCarouselIndex, true);
+    }
+
+    const handleSelect = () => {
+      setSettings({ statsCarouselIndex: api.selectedScrollSnap() });
+    };
+    
+    api.on("select", handleSelect);
+
+    return () => {
+      api.off("select", handleSelect);
+    };
+  }, [api, settings.statsCarouselIndex, setSettings]);
 
   const handleFileChange = (fileId: string) => {
     setSelectedFileId(fileId);
@@ -68,26 +94,6 @@ export default function StatsPage() {
   }, [history, selectedFile]);
 
 
-  const handleWeakWordsQuiz = () => {
-    if (!selectedFileId || weakWords.length === 0) return;
-    const settings = {
-        fileIds: [selectedFileId],
-        questionTypes: ['jp-to-en-typing', 'jp-to-en-mc', 'en-to-jp-mc'] as const,
-        numberOfQuestions: 'all' as const,
-        weakWordsOnly: true, // This tells the quiz manager to use its internal weak words logic for this file
-    };
-    
-    // We need to set the lastQuizSettings to use the generic 'weak-words' fileId
-    // to have it selected on the setup page
-    setLastQuizSettings({
-        ...settings,
-        fileIds: ['weak-words'],
-        weakWordsOnly: true,
-    });
-    setQuizSettings(settings);
-    router.push('/');
-  };
-
   return (
     <div className="container mx-auto max-w-2xl p-4">
       <header className="py-6">
@@ -121,13 +127,38 @@ export default function StatsPage() {
 
           {selectedFileId && fileHistory.length > 0 ? (
             <>
-              <Card>
+               <Card>
                 <CardHeader>
                   <CardTitle>パフォーマンス概要</CardTitle>
-                  <CardDescription>"{selectedFile?.name}" の全体的な正解率。</CardDescription>
+                  <CardDescription>"{selectedFile?.name}" のパフォーマンス。</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <WeakWordsChart history={fileHistory} />
+                  <Carousel setApi={setApi} className="w-full">
+                    <CarouselContent>
+                      <CarouselItem>
+                         <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg">全体的な正解率</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <WeakWordsChart history={fileHistory} />
+                            </CardContent>
+                         </Card>
+                      </CarouselItem>
+                      <CarouselItem>
+                         <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg">正解率の推移</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <AccuracyTrendChart history={fileHistory} />
+                            </CardContent>
+                         </Card>
+                      </CarouselItem>
+                    </CarouselContent>
+                    <CarouselPrevious className="hidden sm:flex" />
+                    <CarouselNext className="hidden sm:flex" />
+                  </Carousel>
                 </CardContent>
               </Card>
 
