@@ -23,6 +23,26 @@ export default function FilesPage() {
   const { files, addFile, deleteFile } = useLinguaLift();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  
+  const parseCsvLine = (line: string): string[] => {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+            inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+            result.push(current.trim().replace(/^"|"$/g, '').trim());
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+    result.push(current.trim().replace(/^"|"$/g, '').trim());
+    return result;
+};
+
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -41,19 +61,28 @@ export default function FilesPage() {
     reader.onload = (e) => {
       const text = e.target?.result as string;
       try {
-        const words: VocabularyWord[] = text
-          .split('\n')
-          .filter(line => line.trim() !== '')
+        const lines = text.split('\n').filter(line => line.trim() !== '');
+        if (lines.length <= 1) { // Also check if there's more than just a header
+            toast({
+              title: 'ファイルが空か、ヘッダーのみです',
+              description: 'CSVファイルに単語が含まれていることを確認してください。',
+              variant: 'destructive',
+            });
+            return;
+        }
+        
+        const words: VocabularyWord[] = lines
+          .slice(1) // Skip the header row
           .map((line, index) => {
-            const [english, japanese] = line.split(',').map(s => s.trim());
-            if (!english || !japanese) throw new Error(`Invalid format on line ${index + 1}`);
+            const [english, japanese] = parseCsvLine(line);
+            if (!english || !japanese) throw new Error(`Invalid format on line ${index + 2}`); // +2 because of slice and 0-based index
             return { id: `${Date.now()}-${index}`, english, japanese };
           });
         
         if (words.length === 0) {
             toast({
-              title: 'ファイルが空です',
-              description: 'CSVファイルに単語が含まれていることを確認してください。',
+              title: '単語が見つかりません',
+              description: 'ヘッダー行以降に単語データがあるか確認してください。',
               variant: 'destructive',
             });
             return;
@@ -73,7 +102,7 @@ export default function FilesPage() {
       } catch (error) {
         toast({
           title: 'CSVの解析中にエラーが発生しました',
-          description: 'CSVが "english,japanese" の形式であることを確認してください。',
+          description: 'CSVが "english,japanese" の形式（ヘッダー行を含む）であることを確認してください。',
           variant: 'destructive',
         });
       }
